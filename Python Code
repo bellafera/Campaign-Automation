@@ -93,16 +93,16 @@ ON t.user_guid = u.user_guid and t.product=u.product and t.excludes=1
 where t.user_guid is null and u.excludes=1  
 group by u.product;"""
 
-# Making a new folder with Campaign ID or Name + date
+# Making a new folder with Campaign ID or Name + date the campaign was launched
 def make_directory(date):
     import os
     directory= "C:\\Users\\callao\\Jean Callao\\Python_Campaigns"
-    filename= "Campaign_Email_Report" + '-' + date
+    filename= "AllApps_NA_Onboarding_Core" + '-' + date
     path=os.path.join(directory + os.sep, filename)
     dir=os.mkdir(path)
     return dir
 
-#Making a path directory with Campaing_id + date
+#Making a path directory with Campaing_id + date the campaign was launched
 def path_directory(date):
     import os
     directory= "C:\\Users\\callao\\Jean Callao\\Python_Campaigns"
@@ -112,7 +112,7 @@ def path_directory(date):
 
 
 
-#Copying images to the Campaign folder ( if you have any images to put into the layout dashboard): 
+#Copying images to the Campaign folder (if you have any images to put into the layout dashboard): 
 def copy_image(date, cpath):
     import os
     import shutil
@@ -147,9 +147,9 @@ CG_All_new_users=db_action(query5)
 Prd_new_users_2=db_action(query6)
 Prd_CG_new_users_2=db_action(query7)
 #
-#
-####New Users – Data Munging
-#
+######################## Data Manipulation############################################
+#New Users
+#Insert Row name
 XD_new_users.insert (1, "product", 'XD', True)
 XD_CG_new_users.insert (1, "product", 'XD', True)
 All_new_users.insert (1, "product", 'ALL APPS', True)
@@ -161,7 +161,7 @@ list=[ 'AFTER EFFECTS', 'ILLUSTRATOR', 'PHOTOSHOP', 'PREMIERE PRO', 'STOCK']
 Prd_new_users= Prd_new_users_2[Prd_new_users_2['product'].isin(list)]
 Prd_CG_new_users =Prd_CG_new_users_2[Prd_CG_new_users_2['product'].isin(list)]
 #
-# Insert new rows
+# Insert new rows into New Users data frame
 Prd_new_users = Prd_new_users.append(XD_new_users, ignore_index=True, sort=True)
 Prd_new_users = Prd_new_users.append(All_new_users, ignore_index=True, sort=True)
 Prd_CG_new_users = Prd_CG_new_users.append(XD_CG_new_users, ignore_index=True, sort=True)
@@ -172,7 +172,8 @@ Prd_new_users.rename( columns={'EXPR_1':'Campaign'}, inplace=True)
 Prd_CG_new_users.rename( columns={'EXPR_1':'Control Group'}, inplace=True) 
 #
 #
-####Percentage of new Users
+######################## Metrics Calculation ############################################
+#Percentage of new Users
 Perc_NU_XD= round(((XD_new_users['EXPR_1']/emails_sent['_c0'])*100),3)
 Perc_NU_XD_CG= round(((XD_CG_new_users['EXPR_1']/CG_emails_sent['_c0'])*100),3)
 Perc_All_new_users = round(((All_new_users['EXPR_1']/emails_sent['_c0'])*100),3)
@@ -212,11 +213,10 @@ Perc_Prd_CG_new_users.insert (2, "product", list, True)
 #
 #
 #
-####LIFT
+#LIFT
 XD_Lift=round(((Perc_NU_XD['Percent of New Users'] - Perc_NU_XD_CG['Percent of CG New Users'])/Perc_NU_XD_CG['Percent of CG New Users']),3)*100
 AllApps_Lift=round(((Perc_All_new_users['Percent of New Users'] - Perc_CG_All_new_users['Percent of CG New Users'])/Perc_CG_All_new_users['Percent of CG New Users']),3)*100
 Prd_new_users_Lift=round((Perc_Prd_new_users['Campaign']- Perc_Prd_CG_new_users['Control Group'])/(Perc_Prd_CG_new_users['Control Group']),3)*100
-#
 #
 #
 #Convert Series into a data frame
@@ -231,7 +231,7 @@ Prd_new_users_Lift.insert (2, "product", list, True)
 #Rename Columns
 emails_sent.rename(columns={'_c0':'Emails Delivered'}, inplace=True)
 CG_emails_sent.rename(columns={'_c0':'Control Group'}, inplace=True)
-
+#
 #Converting specific column to String
 emails_sent=emails_sent.to_string(header=False,index_names=False,index=False)
 CG_emails_sent = CG_emails_sent.to_string(header=False,index_names=False,index=False)
@@ -248,14 +248,13 @@ Perc_Prd_CG_new_users.rename( columns={'product':'Product'}, inplace=True)
 
 Prd_new_users_Lift.rename( columns={'product':'Product'}, inplace=True)
 Prd_new_users_Lift.rename( columns={0:'Lift'}, inplace=True)
-
-
-
+#
+#
+#
 #Dropping Index column
 Perc_Prd_new_users = Perc_Prd_new_users.drop('index', 1)
 Perc_Prd_CG_new_users = Perc_Prd_CG_new_users.drop('index', 1)
 Prd_new_users_Lift = Prd_new_users_Lift.drop('index', 1)
-
 
 #Switching columns order
 Prd_new_users= Prd_new_users[[ 'Product', 'Campaign']]
@@ -285,9 +284,10 @@ print(Prd_new_users_Lift)
 
 
 
+
 #Report Building:
 import os
-date = '2020-02-16'
+date = '2020-02-14'
 make_directory(date)
 cpath=path_directory(date)
 copy_image(date, cpath)
@@ -318,7 +318,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 pdfmetrics.registerFont(TTFont('TNR', 'times.ttf'))
 pdfmetrics.registerFont(TTFont('TNRB', 'timesbd.ttf'))
 
-###########   Building the pages...###########################################
+#################   Building the pages...###########################################
 canvas= Canvas("Email_Campaign_Report.pdf",pagesize = A3)
 #Page1
 # Putting Images
@@ -332,8 +332,6 @@ canvas.setFillColorRGB (0,0,0)
 title = " NA Lifecycle Campaign: All Apps 2020-02-14"
 canvas.drawString(2.2*inch,13.6*inch, title)
 
-
-
 #Inserting Metrics
 #Campaign Emails Delivered 
 emails_sent_banner= ImageReader(cpath+ os.sep+ "Emails_Sent_2.png")
@@ -343,7 +341,7 @@ canvas.setFillColorRGB (0,0,0)
 canvas.drawString(0.6*inch, 11.8*inch, "Campaign")
 canvas.setFont("TNR", 16)
 canvas.setFillColorRGB (0,0,0)
-canvas.drawString(0.6*inch, 11.5*inch,  " " + emails_sent)
+canvas.drawString(0.8*inch, 11.5*inch,  " " + emails_sent)
 
 #Control Group - Emails Not Delivered
 canvas.setFont("TNRB", 16)
@@ -351,7 +349,7 @@ canvas.setFillColorRGB (0,0,0)
 canvas.drawString(2.2*inch, 11.8*inch, "Control Group")
 canvas.setFont("TNR", 16)
 canvas.setFillColorRGB (0,0,0)
-canvas.drawString(2.3*inch, 11.5*inch, " " + CG_emails_sent)
+canvas.drawString(2.4*inch, 11.5*inch, " " + CG_emails_sent)
 
 #
 #New Users
@@ -405,6 +403,7 @@ table2.setStyle(TableStyle([
 #
 table2.wrapOn(canvas, 350, 600)
 table2.drawOn(canvas, 350,600)
+#
 #Percent of New Users
 canvas.setFont("TNRB", 16)
 canvas.setFillColorRGB (0,0,0)
@@ -456,6 +455,7 @@ table4.setStyle(TableStyle([
 table4.wrapOn(canvas, 350, 370)
 table4.drawOn(canvas, 350,370)
 
+
 #New Users Lift
 canvas.setFont("TNRB", 16)
 canvas.setFillColorRGB (0,0,0)
@@ -467,7 +467,6 @@ canvas.drawImage(Prod_Perc_banner, 0, 4.2*inch, mask='auto')
 #
 Prd_new_users_Lift_table= [Prd_new_users_Lift.columns[:,].values.tolist()] + Prd_new_users_Lift.values.tolist()
 #
-#Table 5
 table5=Table(Prd_new_users_Lift_table)
 # 
 table5.setStyle(TableStyle([
