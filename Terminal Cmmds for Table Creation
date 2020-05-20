@@ -1,0 +1,220 @@
+Commands for Creation of the Tables
+
+1)	Open Putty (the command prompt)
+•	At “Saved Sessions”, choose your session, load and open
+•	If Putty is not working, go to SSH> Remote command:
+Change: ssh -t PSMConnect@sshp.wipc.adobe.com callao hdpprod or1hdp006.corp.adobe.com
+To this : ssh callao@hdpprod#ids-security-endpoint.corp.adobe.com@or1hdp006.corp.adobe.com@sshp.wipc.adobe.com
+
+2)	At the command prompt, switch users:
+•	Run this command:  su – (your username)
+•	Run this command: vi run_shell.sh (name of the shell script). 
+•	Inside the vi editor: Press i to insert the shell script below. Then press Esc and write wq! (to exit and save your work)
+•	Repeat the steps above and save the SQL script: vi  table_script.sql
+•	Run your shell script:
+nohup sh run_shell.sh 2019_11_22_XD_Wireframes_NA_Onboarding &
+Note: table highlighted in yellow must exist before running this command. Change table name every time you run this command for a new campaign.
+
+3)	To check the logs and see if the above command was completed: 
+tail -f nohup.out
+4)	When completed, run this command:
+•	mailx -s "Process completed" callao@adobe.com
+Note: This command notifies the task is completed by sending you an email.
+5)	Run ctrl + c to exit any process
+
+
+
+
+
+Shell Script (run_shell.sh):
+TABLE_NAME=$1
+
+RUN_DATE=${TABLE_NAME:0:4}-${TABLE_NAME:5:2}-${TABLE_NAME:8:2}
+TABLE_NAME_DATE=${TABLE_NAME:0:10}
+
+echo TABLE NAME      : ${TABLE_NAME}
+echo RUN_DATE        : ${RUN_DATE}
+echo TABLE_NAME_DATE : ${TABLE_NAME_DATE}
+
+# HIVE SCRIPT WITH DATE PARAMETERS USED TO PASS IN AND CREATE THE TABLES FOR CAMPAIGN REPORTS
+
+hive -d "RUN_DATE"="${RUN_DATE}" -d "TABLE_NAME_DATE"="${TABLE_NAME_DATE}" -d "TABLE_NAME"="${TABLE_NAME}" -f table_scripts.sql
+
+
+
+Table SQL script (table_script.sql):
+
+--${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding
+-- create temporary table for email guids
+
+use cce_tmp;
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids;
+
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids AS 
+SELECT  
+a.*, 
+b.user_guid, 
+b.pers_email, 
+b.pers_first_name, 
+b.pers_last_name, 
+b.pers_country_code,
+c.contract_offer_type,
+c.delegation_status,
+c.is_valid,
+c.offering_name,
+c.contract_end_date,		
+c.cloud_type,
+c.org_name,
+c.org_id,
+c.member_guid,
+c.first_delegation_date,
+c.country,
+c.market_segment,  
+c.geo_description,  
+c.market_area_description
+FROM cce_tmp.${TABLE_NAME} a  
+INNER JOIN warehouse.dim_user_lvt_profile b  
+ON ucase(trim(a.emails)) = ucase(b.pers_email) 
+INNER JOIN enterprise.fact_enterprise_member_license_delegation c
+ON b.user_guid = c.member_guid 
+;
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+--- create temporary table for XD only - post and pre-event tables
+--Post Event
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_post;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_post as
+select 
+distinct 
+member_guid, 
+org_name 
+from cce.xd_events m
+where user_type='ETLA' and event_type='XD_USAGE' and event_date between '${RUN_DATE}' and date_add('${RUN_DATE}',28)
+and m.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids where excludes=0 and member_guid= m.member_guid)
+;
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_pre;
+
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_pre as
+select 
+distinct 
+n.member_guid, 
+n.org_name 
+from cce.xd_events n
+where n.user_type='ETLA' 
+and n.event_type='XD_USAGE' 
+and n.event_date between date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)
+and n.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids where excludes=0 and member_guid= n.member_guid)
+;
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+--- create temporary table for XD only EXCLUDES- post and pre-event tables
+--Post Event
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_post_excludes;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_post_excludes as
+select 
+distinct 
+member_guid, 
+org_name 
+from cce.xd_events m
+where user_type='ETLA' and event_type='XD_USAGE' and event_date between '${RUN_DATE}' and date_add('${RUN_DATE}',28)
+and m.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids where excludes=1 and member_guid= m.member_guid)
+;
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_pre_excludes;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_pre_excludes as
+select 
+distinct 
+n.member_guid, 
+n.org_name 
+from cce.xd_events n
+where n.user_type='ETLA' and n.event_type='XD_USAGE' and n.event_date between  date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)
+and n.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids where excludes=1 and member_guid= n.member_guid)
+;
+
+
+--- create temporary table for products- pre and post event
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_prod_post_event;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_prod_post_event AS   
+SELECT 
+distinct(user_guid),
+excludes,
+mp.product,
+mp.category,
+u.activity_date 
+from 
+cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids e 
+INNER JOIN 
+(SELECT member_guid, 
+UCASE(category) AS category, 
+UCASE(product) AS product, 
+activity_date 
+FROM ccmusg.fact_user_activity 
+WHERE category != 'ACROBAT_SESSION' 
+AND category != 'HIGHBEAM_SESSION' 
+AND product NOT LIKE 'ACROBAT%' 
+AND partition_date 
+BETWEEN '${RUN_DATE}' and date_add('${RUN_DATE}',28)) AS u 
+ON e.user_guid = u.member_guid 
+INNER JOIN enterprise.ent_product_map_cce mp 
+ON (mp.product_code = u.product 
+AND mp.category_code = u.category)
+;
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_prod_pre_event;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_prod_pre_event AS  
+SELECT distinct(user_guid),excludes,mp.product,mp.category,u.activity_date 
+from 
+cce_tmp.mm_campaign_${TABLE_NAME_DATE}_XD_Wireframes_NA_Onboarding_guids e 
+INNER JOIN 
+(SELECT member_guid, 
+UCASE(category) AS category, 
+UCASE(product) AS product, 
+activity_date 
+FROM ccmusg.fact_user_activity 
+WHERE category != 'ACROBAT_SESSION' 
+AND category != 'HIGHBEAM_SESSION' 
+AND product NOT LIKE 'ACROBAT%' 
+AND partition_date 
+BETWEEN date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)) u 
+ON e.user_guid = u.member_guid 
+INNER JOIN enterprise.ent_product_map_cce mp 
+ON (mp.product_code = u.product 
+AND mp.category_code = u.category)
+;
+
