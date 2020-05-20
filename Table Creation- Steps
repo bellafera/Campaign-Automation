@@ -1,0 +1,14 @@
+NOTES:
+
+Objective: Use Python code to automate the generation of the ongoing campaign reports.
+
+STEPS:
+1)	At the Anaconda prompt type: python
+2)	Paste “Automation_Campaign_Python_script” and press enter. Make sure to change the campaign name every time you run the code for a different campaign.
+3)	The Python script:  
+•	Connects to Hive through the ODBC driver
+•	Uses SQL to query the tables on Hive
+•	Manipulates the data and calculates all the metrics for the campaign report
+•	Converts the metrics into string and put them in a report layout using ReportLab module
+•	Saves the report as .pdf in created folder with the campaign name and date the campaign was launched
+2) To automate the running of the script you can use Crontab. Please follow the steps here: https://opensource.com/article/17/11/how-use-cron-linux. Please change the path where the Python script is located.
