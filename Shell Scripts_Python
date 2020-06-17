@@ -1,0 +1,728 @@
+TABLE_NAME=$1
+
+RUN_DATE=${TABLE_NAME:0:4}-${TABLE_NAME:5:2}-${TABLE_NAME:8:2}
+TABLE_NAME_DATE=${TABLE_NAME:0:10}
+
+echo TABLE NAME      : ${TABLE_NAME}
+echo RUN_DATE        : ${RUN_DATE}
+echo TABLE_NAME_DATE : ${TABLE_NAME_DATE}
+
+# HIVE SCRIPT WITH DATE PARAMETERS USED TO PASS IN AND CREATE THE TABLES FOR CAMPAIGN REPORTS
+
+hive -d "RUN_DATE"="${RUN_DATE}" -d "TABLE_NAME_DATE"="${TABLE_NAME_DATE}" -d "TABLE_NAME"="${TABLE_NAME}" -f table_scripts.sql
+
+# Using Command Prompt running the shell script 
+# nohup sh run_shell.sh 2020_05_19_XD_Wireframes_NA_Onboarding &
+
+
+
+--${TABLE_NAME}
+-- create temporary table for email guids
+
+use cce_tmp;
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_guids;
+
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_guids AS 
+SELECT  
+a.*, 
+b.user_guid, 
+b.pers_email, 
+b.pers_first_name, 
+b.pers_last_name, 
+b.pers_country_code,
+c.contract_offer_type,
+c.delegation_status,
+c.is_valid,
+c.offering_name,
+c.contract_end_date,		
+c.cloud_type,
+c.org_name,
+c.org_id,
+c.member_guid,
+c.first_delegation_date,
+c.country,
+c.market_segment,  
+c.geo_description,  
+c.market_area_description
+FROM cce_tmp.${TABLE_NAME} a  
+INNER JOIN warehouse.dim_user_lvt_profile b  
+ON ucase(trim(a.emails)) = ucase(b.pers_email) 
+INNER JOIN enterprise.fact_enterprise_member_license_delegation c
+ON b.user_guid = c.member_guid 
+;
+
+
+
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+--- create temporary table for XD only - post and pre-event tables
+--Post Event
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_post;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_post as
+select 
+distinct 
+member_guid, 
+org_name 
+from cce.xd_events m
+where user_type='ETLA' and event_type='XD_USAGE' and event_date between '${RUN_DATE}' and date_add('${RUN_DATE}',28)
+and m.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME}_guids where excludes=0 and member_guid= m.member_guid)
+;
+
+
+
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_pre;
+
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_pre as
+select 
+distinct 
+n.member_guid, 
+n.org_name 
+from cce.xd_events n
+where n.user_type='ETLA' 
+and n.event_type='XD_USAGE' 
+and n.event_date between date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)
+and n.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME}_guids where excludes=0 and member_guid= n.member_guid)
+;
+
+
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+--- create temporary table for XD only EXCLUDES- post and pre-event tables
+--Post Event
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_post_excludes;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_post_excludes as
+select 
+distinct 
+member_guid, 
+org_name 
+from cce.xd_events m
+where user_type='ETLA' and event_type='XD_USAGE' and event_date between '${RUN_DATE}' and date_add('${RUN_DATE}',28)
+and m.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME}_guids where excludes=1 and member_guid= m.member_guid)
+;
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_pre_excludes;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_pre_excludes as
+select 
+distinct 
+n.member_guid, 
+n.org_name 
+from cce.xd_events n
+where n.user_type='ETLA' and n.event_type='XD_USAGE' and n.event_date between  date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)
+and n.member_guid IN 
+(select member_guid from cce_tmp.mm_campaign_${TABLE_NAME}_guids where excludes=1 and member_guid= n.member_guid)
+;
+
+
+--- create temporary table for products- pre and post event
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_prod_post_event;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_prod_post_event AS   
+SELECT 
+distinct(user_guid),
+excludes,
+mp.product,
+mp.category,
+u.activity_date 
+from 
+cce_tmp.mm_campaign_${TABLE_NAME}_guids e 
+INNER JOIN 
+(SELECT member_guid, 
+UCASE(category) AS category, 
+UCASE(product) AS product, 
+activity_date 
+FROM ccmusg.fact_user_activity 
+WHERE category != 'ACROBAT_SESSION' 
+AND category != 'HIGHBEAM_SESSION' 
+AND product NOT LIKE 'ACROBAT%' 
+AND partition_date 
+BETWEEN '${RUN_DATE}' and date_add('${RUN_DATE}',28)) AS u 
+ON e.user_guid = u.member_guid 
+INNER JOIN enterprise.ent_product_map_cce mp 
+ON (mp.product_code = u.product 
+AND mp.category_code = u.category)
+;
+
+
+
+set hive.exec.dynamic.partition.mode=nonstrict ;
+set hive.execution.engine = mr ;
+set mapred.job.queue.name=root.adhoc.standard;
+
+drop table if exists cce_tmp.mm_campaign_${TABLE_NAME}_prod_pre_event;
+CREATE TABLE cce_tmp.mm_campaign_${TABLE_NAME}_prod_pre_event AS  
+SELECT distinct(user_guid),excludes,mp.product,mp.category,u.activity_date 
+from 
+cce_tmp.mm_campaign_${TABLE_NAME}_guids e 
+INNER JOIN 
+(SELECT member_guid, 
+UCASE(category) AS category, 
+UCASE(product) AS product, 
+activity_date 
+FROM ccmusg.fact_user_activity 
+WHERE category != 'ACROBAT_SESSION' 
+AND category != 'HIGHBEAM_SESSION' 
+AND product NOT LIKE 'ACROBAT%' 
+AND partition_date 
+BETWEEN date_sub('${RUN_DATE}',28) and date_sub('${RUN_DATE}',1)) u 
+ON e.user_guid = u.member_guid 
+INNER JOIN enterprise.ent_product_map_cce mp 
+ON (mp.product_code = u.product 
+AND mp.category_code = u.category)
+;
+
+
+
+
+
+
+
+#Import modulus:
+#import psycopg2
+import pandas.io.sql as psql
+from pyhive import hive
+import pandas as pd
+import os, sys
+import pyodbc
+
+#Connecting to DB:
+
+from turbodbc import connect, make_options
+options = make_options(autocommit=True)
+
+#Campaign New Users
+def db_action(query):
+    import pyodbc
+    import pandas as pd
+    connection = connect(dsn='Hive Prod', turbodbc_options=options) 
+    cursor = connection.cursor()
+    cursor.execute(query)
+    columns = [c[0] for c in cursor.description]
+    data = cursor.fetchall()
+    df = pd.DataFrame(data, columns=columns)
+    if  len(df)==0:
+        print ("Data doesn't exist")
+    else:
+        return df
+        connection.close()
+
+#Emails Delivered --
+query0= "SELECT count(distinct(emails)) from cce_tmp.2020_04_21_Stock_Lifecycle_NA_Onboarding where excludes=0;"
+
+#Emails Delivered Control Group--
+query1= "SELECT count(distinct(emails)) from cce_tmp.2020_04_21_Stock_Lifecycle_NA_Onboarding where excludes=1;"
+
+#New Users for XD
+query2 ="""
+select count(distinct(a.member_guid)) from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_post a 
+left join 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_pre b 
+on a.member_guid = b.member_guid 
+where b.member_guid IS NULL;"""
+
+#Control Group New Users for XD
+query3 ="""
+select count(distinct(a.member_guid)) from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_post_excludes a 
+left join 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_pre_excludes b 
+on a.member_guid = b.member_guid 
+where b.member_guid IS NULL;"""
+
+
+
+
+#NEW USERS --All products
+query4="""
+select count(distinct(u.user_guid)) from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_post_event as u 
+LEFT JOIN 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_pre_event as t 
+ON t.user_guid = u.user_guid and t.category=u.category and t.excludes=0  
+where t.user_guid is null and u.excludes=0;"""
+
+#CONTROL GROUP NEW USERS --All products--
+query5="""
+select count(distinct(u.user_guid)) from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_post_event as u 
+LEFT JOIN 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_pre_event as t 
+ON t.user_guid = u.user_guid and t.category=u.category and t.excludes=1 
+where t.user_guid is null and u.excludes=1;"""
+
+
+#NEW USERS - For a specific product other than XD (PS)
+query6="""
+select count(distinct(u.user_guid)), u.product from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_post_event as u 
+LEFT JOIN 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_pre_event as t 
+ON t.user_guid = u.user_guid and t.product=u.product and t.excludes=0 
+where t.user_guid is null and u.excludes=0 
+group by u.product;"""
+
+#CONTROL GROUP FOR NEW USERS  - For a specific product other than XD (Ai)
+query7="""
+select count(distinct(u.user_guid)), u.product from 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_post_event as u 
+LEFT JOIN 
+cce_tmp.mm_campaign_2020_04_21_Stock_Lifecycle_NA_Onboarding_prod_pre_event as t 
+ON t.user_guid = u.user_guid and t.product=u.product and t.excludes=1 
+where t.user_guid is null and u.excludes=1  
+group by u.product;"""
+
+# Making a new folder with Campaign ID or Name + date the campaign was launched
+def make_directory(date):
+    import os
+    directory= "C:\\Users\\callao\\Jean Callao\\Python_Campaigns"
+    filename= "AllApps_NA_Onboarding_Core" + '-' + date
+    path=os.path.join(directory + os.sep, filename)
+    dir=os.mkdir(path)
+    return dir
+
+#Making a path directory with Campaing_id + date the campaign was launched
+def path_directory(date):
+    import os
+    directory= "C:\\Users\\callao\\Jean Callao\\Python_Campaigns"
+    filename= "AllApps_NA_Onboarding_Core" + '-' + date
+    path=os.path.join(directory + os.sep, filename)
+    return path
+
+#Copying images to the Campaign folder (if you have any images to put into the layout dashboard): 
+def copy_image(date, cpath):
+    import os
+    import shutil
+    src = "C:\\Users\\callao\\Jean Callao\\Python_Campaigns\\Images"
+    listOfFiles = os.listdir(src)
+    dst = cpath
+    for f in listOfFiles:
+       f = os.path.join(src, f)
+       if os.path.isfile(f):
+           shutil.copy(f, dst)
+
+
+
+
+###Calculating the metrics and create Report:
+import os
+import pandas as pd
+import numpy as np
+import math
+#
+#Data Munging
+emails_sent=db_action(query0)
+CG_emails_sent =db_action(query1)
+XD_new_users=db_action(query2)
+XD_CG_new_users=db_action(query3)
+All_new_users=db_action(query4)
+CG_All_new_users=db_action(query5)
+Prd_new_users_2=db_action(query6)
+Prd_CG_new_users_2=db_action(query7)
+
+
+
+######################## Data Manipulation############################################
+##New Users
+#Insert Row name
+XD_new_users.insert (1, "product", 'XD', True)
+XD_CG_new_users.insert (1, "product", 'XD', True)
+All_new_users.insert (1, "product", 'ALL APPS', True)
+CG_All_new_users.insert (1, "product", 'ALL APPS', True)
+#
+#Subset Dataframes:
+list=[ 'AFTER EFFECTS', 'ILLUSTRATOR', 'PHOTOSHOP', 'PREMIERE PRO', 'STOCK']
+Prd_new_users= Prd_new_users_2[Prd_new_users_2['product'].isin(list)]
+Prd_CG_new_users =Prd_CG_new_users_2[Prd_CG_new_users_2['product'].isin(list)]
+#
+# Insert new rows into New Users data frame
+Prd_new_users = Prd_new_users.append(XD_new_users, ignore_index=True, sort=True)
+Prd_new_users = Prd_new_users.append(All_new_users, ignore_index=True, sort=True)
+Prd_CG_new_users = Prd_CG_new_users.append(XD_CG_new_users, ignore_index=True, sort=True)
+Prd_CG_new_users = Prd_CG_new_users.append(CG_All_new_users, ignore_index=True, sort=True)
+#
+#Rename Column
+Prd_new_users.rename( columns={'EXPR_1':'Campaign'}, inplace=True) 
+Prd_CG_new_users.rename( columns={'EXPR_1':'Control Group'}, inplace=True) 
+#
+#
+######################## Metrics Calculation ############################################
+##Percentage of new Users
+
+Constant= emails_sent['_c0'].values[0]
+Perc_Prd_new_users=(Prd_new_users['Campaign'].div(Constant))
+
+Const= CG_emails_sent['_c0'].values[0]
+Perc_Prd_CG_new_users=(Prd_CG_new_users['Control Group'].div(Const))
+#Perc_Prd_CG_new_users=round(Perc_Prd_CG_new_users, 3)*100
+#
+#Convert Series into a data frame
+Perc_Prd_new_users = Perc_Prd_new_users.to_frame().reset_index()
+Perc_Prd_CG_new_users = Perc_Prd_CG_new_users.to_frame().reset_index()
+
+
+#Insert Column-- data type of campaigns is float
+list2=['AFTER EFFECTS', 'ILLUSTRATOR', 'PHOTOSHOP', 'PREMIERE PRO', 'STOCK', 'XD', 'ALL APPS']
+Perc_Prd_new_users.insert(2, "product", list2, True)
+Perc_Prd_CG_new_users.insert (2, "product", list2, True)
+#
+#
+#
+##LIFT
+
+Prd_new_users_Lift=(Perc_Prd_new_users['Campaign']- Perc_Prd_CG_new_users['Control Group'])/(Perc_Prd_CG_new_users['Control Group'])
+#
+#Convert Series into a data frame
+Prd_new_users_Lift = Prd_new_users_Lift.to_frame().reset_index()
+#
+#Insert Column--data type of campaigns is float
+list3=['AFTER EFFECTS', 'ILLUSTRATOR', 'PHOTOSHOP', 'PREMIERE PRO', 'STOCK', 'XD', 'ALL APPS']
+Prd_new_users_Lift.insert (2, "product", list3, True)
+#
+#
+#Rename Columns
+emails_sent.rename(columns={'_c0':'Emails Delivered'}, inplace=True)
+CG_emails_sent.rename(columns={'_c0':'Control Group'}, inplace=True)
+#
+#Converting specific column to String
+emails_sent=emails_sent.to_string(header=False,index_names=False,index=False)
+CG_emails_sent = CG_emails_sent.to_string(header=False,index_names=False,index=False)
+#
+#Rename Columns
+Prd_new_users.rename( columns={'product':'Product'}, inplace=True) 
+Prd_CG_new_users.rename( columns={'product':'Product'}, inplace=True)
+Perc_Prd_new_users.rename( columns={'product':'Product'}, inplace=True)
+Perc_Prd_CG_new_users.rename( columns={'product':'Product'}, inplace=True)
+Prd_new_users_Lift.rename( columns={'product':'Product'}, inplace=True)
+Prd_new_users_Lift.rename( columns={0:'Lift'}, inplace=True)
+
+
+
+
+#Dropping Index column
+Perc_Prd_new_users = Perc_Prd_new_users.drop('index', 1)
+Perc_Prd_CG_new_users = Perc_Prd_CG_new_users.drop('index', 1)
+Prd_new_users_Lift = Prd_new_users_Lift.drop('index', 1)
+
+
+#Convert into a numeric type:
+Prd_new_users_Lift['Lift'] = pd.to_numeric(Prd_new_users_Lift['Lift'], errors='coerce')
+Prd_new_users_Lift['Lift'] = (Prd_new_users_Lift['Lift'].round(3))*100
+
+Perc_Prd_new_users['Campaign'] = pd.to_numeric(Perc_Prd_new_users['Campaign'], errors='coerce')
+Perc_Prd_new_users['Campaign'] = (Perc_Prd_new_users['Campaign'].round(3))*100
+
+Perc_Prd_CG_new_users['Control Group'] = pd.to_numeric(Perc_Prd_CG_new_users['Control Group'], errors='coerce')
+Perc_Prd_CG_new_users['Control Group'] = (Perc_Prd_CG_new_users['Control Group'].round(3))*100
+
+#Switching columns order
+Prd_new_users = Prd_new_users[[ 'Product', 'Campaign']]
+Prd_CG_new_users = Prd_CG_new_users[[ 'Product', 'Control Group']]
+Perc_Prd_new_users = Perc_Prd_new_users[[ 'Product', 'Campaign']]
+Perc_Prd_CG_new_users = Perc_Prd_CG_new_users[[ 'Product', 'Control Group']]
+Prd_new_users_Lift = Prd_new_users_Lift[[ 'Product', 'Lift']]
+
+# Convert into a float and add the % sign:
+
+Prd_new_users_Lift['Lift'] = Prd_new_users_Lift['Lift'].astype(str)+ '%'
+Perc_Prd_new_users['Campaign'] = Perc_Prd_new_users['Campaign'].astype(str)+ '%'
+Perc_Prd_CG_new_users['Control Group'] = Perc_Prd_CG_new_users['Control Group'].astype(str)+ '%'
+print(emails_sent)
+print(CG_emails_sent)
+print(Prd_new_users)
+print(Prd_CG_new_users)
+print(Perc_Prd_new_users)
+print(Perc_Prd_CG_new_users)
+print(Prd_new_users_Lift)
+
+
+#Report Building:
+import os
+date = '2020-04-21'
+make_directory(date)
+cpath=path_directory(date)
+copy_image(date, cpath)
+os.chdir(cpath)
+
+
+from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib import utils
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import A3
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image,TableStyle,Frame
+from reportlab.lib.units import inch
+from reportlab.platypus.tables import Table
+from reportlab.lib import colors  
+from reportlab.lib.validators import _isColor
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
+from reportlab.lib.colors import CMYKColor, PCMYKColor,HexColor
+#from cStringIO import StringIO
+from PIL import Image
+import PIL.Image
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+#
+#Registering Fonts: 
+pdfmetrics.registerFont(TTFont('TNR', 'times.ttf'))
+pdfmetrics.registerFont(TTFont('TNRB', 'timesbd.ttf'))
+
+#################   Building the pages...###########################################
+canvas= Canvas("2020_04_21_Stock_Lifecycle_NA_Onboarding .pdf",pagesize = A3)
+#Page1
+# Putting Images
+canvas.setFillColor(HexColor('#000000'))
+Adobe_LogoType= ImageReader(cpath+ os.sep+ "Campaign_Heading_2.png")
+canvas.drawImage(Adobe_LogoType, 0, 14.2*inch, mask='auto')
+
+
+canvas.setFont("TNRB", 26)
+canvas.setFillColorRGB (0,0,0)
+title = "2020_04_21_Stock_Lifecycle_NA_Onboarding "
+canvas.drawString(2.2*inch,13.6*inch, title)
+
+#Inserting Metrics
+#Campaign Emails Delivered 
+emails_sent_banner= ImageReader(cpath+ os.sep+ "Emails_Sent_2.png")
+canvas.drawImage(emails_sent_banner, 0, 12.2*inch, mask='auto')
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+canvas.drawString(0.6*inch, 11.8*inch, "Campaign")
+canvas.setFont("TNR", 16)
+canvas.setFillColorRGB (0,0,0)
+canvas.drawString(0.6*inch, 11.5*inch,  " " + emails_sent)
+
+#Control Group - Emails Not Delivered
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+canvas.drawString(2.2*inch, 11.8*inch, "Control Group")
+canvas.setFont("TNR", 16)
+canvas.setFillColorRGB (0,0,0)
+canvas.drawString(2.3*inch, 11.5*inch, " " + CG_emails_sent)
+
+#
+#New Users
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+# Putting Images
+Prd_new_users_banner= ImageReader(cpath+ os.sep+ "New_Users_2.png")
+canvas.drawImage(Prd_new_users_banner, 0, 10.6*inch, mask='auto')
+#
+#Converting Prd_new_users to list:
+#
+Prd_new_users_table= [Prd_new_users.columns[:,].values.tolist()] + Prd_new_users.values.tolist()
+Prd_new_users_table =list(Prd_new_users_table)
+type(Prd_new_users_table)
+
+#Table 1
+table1=Table(Prd_new_users_table)
+# 
+table1.setStyle(TableStyle([
+('ALIGN',(0,0),(0,0),'LEFT'),
+('BOTTOMPADDING', (0,0),(-1,0),10),
+('FONTSIZE', (0, 0), (-1, 0), 16),
+('FONTNAME', (0, 0), (-1, 0), "TNRB"),
+('TEXTCOLOR',(0,0),(-1,0),colors.black),
+('TEXTCOLOR',(1,0),(1,-1),colors.black),
+("LINEBELOW", (0,1), (-1,-1), 1, colors.black),
+('BACKGROUND', (0, 0), (-1, 0), colors.white),
+]))
+table1.wrapOn(canvas, 40, 600)
+table1.drawOn(canvas, 40,600)
+
+#Control Group New Users
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+#Converting Prd_CG_new_users to list:
+#
+Prd_CG_new_users_table= [Prd_CG_new_users.columns[:,].values.tolist()] + Prd_CG_new_users.values.tolist()
+Prd_CG_new_users_table =list(Prd_CG_new_users_table)
+type(Prd_CG_new_users_table)
+
+#
+#Table 2
+table2=Table(Prd_CG_new_users_table)
+# 
+table2.setStyle(TableStyle([
+('ALIGN',(0,0),(0,0),'LEFT'),
+('BOTTOMPADDING', (0,0),(-1,0),10),
+('FONTSIZE', (0, 0), (-1, 0), 16),
+('FONTNAME', (0, 0), (-1, 0), "TNRB"),
+('TEXTCOLOR',(0,0),(-1,0),colors.black),
+('TEXTCOLOR',(1,0),(1,-1),colors.black),
+("LINEBELOW", (0,1), (-1,-1), 1, colors.black),
+('BACKGROUND', (0, 0), (-1, 0), colors.white),
+]))
+#
+table2.wrapOn(canvas, 350, 600)
+table2.drawOn(canvas, 350,600)
+#
+#Percent of New Users
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+# Putting Images
+Prod_Perc_banner= ImageReader(cpath+ os.sep+ "Perc_New_Users.png")
+canvas.drawImage(Prod_Perc_banner, 0, 7.4*inch, mask='auto')
+
+#Converting Perc_Prd_new_users to list:
+Perc_Prd_new_users_table= [Perc_Prd_new_users.columns[:,].values.tolist()] + Perc_Prd_new_users.values.tolist()
+Perc_Prd_new_users_table =list(Perc_Prd_new_users_table)
+type(Perc_Prd_new_users_table)
+#
+#Table 3
+table3=Table(Perc_Prd_new_users_table)
+# 
+table3.setStyle(TableStyle([
+('ALIGN',(0,0),(0,0),'LEFT'),
+('BOTTOMPADDING', (0,0),(-1,0),10),
+('FONTSIZE', (0, 0), (-1, 0), 16),
+('FONTNAME', (0, 0), (-1, 0), "TNRB"),
+('TEXTCOLOR',(0,0),(-1,0),colors.black),
+('TEXTCOLOR',(1,0),(1,-1),colors.black),
+("LINEBELOW", (0,1), (-1,-1), 1, colors.black),
+('BACKGROUND', (0, 0), (-1, 0), colors.white),
+]))
+#
+table3.wrapOn(canvas, 40, 370)
+table3.drawOn(canvas, 40,370)
+
+#Percent of New Users Control Group
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+#Converting Perc_Prd_CG_new_users to list:
+#
+Perc_Prd_CG_new_users_table= [Perc_Prd_CG_new_users.columns[:,].values.tolist()] + Perc_Prd_CG_new_users.values.tolist()
+Perc_Prd_CG_new_users_table =list(Perc_Prd_CG_new_users_table)
+type(Perc_Prd_CG_new_users_table)
+
+#
+#Table 4
+table4=Table(Perc_Prd_CG_new_users_table)
+# 
+table4.setStyle(TableStyle([
+('ALIGN',(0,0),(0,0),'LEFT'),
+('BOTTOMPADDING', (0,0),(-1,0),10),
+('FONTSIZE', (0, 0), (-1, 0), 16),
+('FONTNAME', (0, 0), (-1, 0), "TNRB"),
+('TEXTCOLOR',(0,0),(-1,0),colors.black),
+('TEXTCOLOR',(1,0),(1,-1),colors.black),
+("LINEBELOW", (0,1), (-1,-1), 1, colors.black),
+('BACKGROUND', (0, 0), (-1, 0), colors.white),
+]))
+#
+table4.wrapOn(canvas, 350, 370)
+table4.drawOn(canvas, 350,370)
+
+
+#New Users Lift
+canvas.setFont("TNRB", 16)
+canvas.setFillColorRGB (0,0,0)
+# Putting Images
+Prod_Perc_banner= ImageReader(cpath+ os.sep+ "New_Users_Lift.png")
+canvas.drawImage(Prod_Perc_banner, 0, 4.2*inch, mask='auto')
+
+#Converting Prd_new_users_Lift to list:
+#
+Prd_new_users_Lift_table = [Prd_new_users_Lift.columns[:,].values.tolist()] + Prd_new_users_Lift.values.tolist()
+Prd_new_users_Lift_table = list(Prd_new_users_Lift_table)
+type(Prd_new_users_Lift_table)
+
+#
+table5=Table(Prd_new_users_Lift_table)
+# 
+table5.setStyle(TableStyle([
+('ALIGN',(0,0),(0,0),'LEFT'),
+('BOTTOMPADDING', (0,0),(-1,0),10),
+('FONTSIZE', (0, 0), (-1, 0), 16),
+('FONTNAME', (0, 0), (-1, 0), "TNRB"),
+('TEXTCOLOR',(0,0),(-1,0),colors.black),
+('TEXTCOLOR',(1,0),(1,-1),colors.black),
+("LINEBELOW", (0,1), (-1,-1), 1, colors.black),
+('BACKGROUND', (0, 0), (-1, 0), colors.white),
+]))
+#
+table5.wrapOn(canvas, 40, 140)
+table5.drawOn(canvas, 40,140)
+
+
+canvas.showPage()
+canvas.save()
+
+
+
+
+############################### Sending Email-Function (optional)#######################
+# I haven’t tested this function yet. You might have to change the line with * to Adobe credentials
+
+def mail(gmail_user,gmail_pwd,recipients, subject, text, attach):
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    from email.mime.text import MIMEText
+    from email import encoders
+    import os
+    msg = MIMEMultipart()
+    *msg['From'] = gmail_user
+    msg['recipients'] =  ", ".join(recipients)
+    msg['Subject'] = subject
+    *msg.attach(MIMEText(text))
+    *part = MIMEBase('application', 'octet-stream')
+    part.set_payload(open(attach, 'rb').read())
+    Encoders.encode_base64(part)
+    part.add_header('Content-Disposition', 'attachment; filename="%s"' % os.path.basename(attach))
+    msg.attach(part)
+    *mailServer = smtplib.SMTP("smtp.gmail.com", 587)
+    mailServer.ehlo()
+    mailServer.starttls()
+    mailServer.ehlo()
+    mailServer.login(gmail_user, gmail_pwd)
+    mailServer.sendmail(gmail_user, recipients, msg.as_string())
+    mailServer.close()
+
+
+###### Main function:
+if __name__ == '__main__':
+    import sys
+    gmail_user = "your adobe email"
+    gmail_pwd = "your password"  
+    recipients= ['recepient_1 email',' recepient_2 email']
+    subject= "2020_04_21_Stock_Lifecycle_NA_Onboarding  Report!"
+    text = "Check out the report for 2020_04_21_Stock_Lifecycle_NA_Onboarding"
+    attach = "2020_04_21_Stock_Lifecycle_NA_Onboarding.pdf"
+    mail(gmail_user,gmail_pwd,recipients, subject, text, attach)
+
+
+
+
